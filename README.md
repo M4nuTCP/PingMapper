@@ -1,6 +1,6 @@
 # PingMapper
 
-**PingMapper** realiza un escaneo sistemático de subredes privadas comunes para detectar dispositivos activos. También genera un informe detallado en formato HTML con un diseño visual que incluye:
+PingMapper escanea todas las tramas de una red privada y detecta los hosts activos en cada una. Con esta información, genera un informe en HTML que puede visualizarse fácilmente iniciando un servidor con Python:
 
 - Tramas de red detectadas.
 - Hosts encontrados en cada trama.
