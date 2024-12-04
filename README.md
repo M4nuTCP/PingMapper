@@ -1,10 +1,6 @@
 # PingMapper
 
-# Herramienta de Auditoría de Red Local
-
-## Descripción
-
-La herramienta realiza un escaneo sistemático de subredes privadas comunes para detectar dispositivos activos. También genera un informe detallado en formato HTML con un diseño visual que incluye:
+**PingMapper** realiza un escaneo sistemático de subredes privadas comunes para detectar dispositivos activos. También genera un informe detallado en formato HTML con un diseño visual que incluye:
 
 - Tramas de red detectadas.
 - Hosts encontrados en cada trama.
