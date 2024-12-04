@@ -4,8 +4,6 @@
 
 ## Descripción
 
-Esta es una herramienta especializada para auditorías locales en entornos donde no sabemos qué nos vamos a encontrar. Sirve como un primer paso para explorar la infraestructura de red en la que estamos trabajando. Es ideal para identificar tramas de red activas y los hosts presentes en ellas.
-
 La herramienta realiza un escaneo sistemático de subredes privadas comunes para detectar dispositivos activos. También genera un informe detallado en formato HTML con un diseño visual que incluye:
 
 - Tramas de red detectadas.
