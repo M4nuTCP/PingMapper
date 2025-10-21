@@ -1,48 +1,61 @@
 #!/usr/bin/env python3
 
-import os
-import subprocess
+import argparse
 import platform
+import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
-from scapy.all import sniff, IP, ARP
+
 from jinja2 import Template
 
-def ping(ip):
+def ping(ip, timeout=1.0):
     param = "-n" if platform.system().lower() == "windows" else "-c"
     command = ["ping", param, "1", ip]
     try:
-        subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
+        subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
         return ip, True
     except subprocess.TimeoutExpired:
         return ip, False
 
-def ping_subnet(subnet):
+def ping_subnet(subnet, timeout=1.0, max_workers=20, delay=0.0):
     active_hosts = []
     ip_range = [f"{subnet}.{i}" for i in range(1, 255)]
-    with ThreadPoolExecutor(max_workers=50) as executor:
-        results = executor.map(ping, ip_range)
-    for ip, status in results:
-        if status:
-            print(f"{ip}")
-            active_hosts.append(ip)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(lambda target: ping(target, timeout=timeout), ip_range)
+        for ip, status in results:
+            if delay:
+                time.sleep(delay)
+            if status:
+                print(f"{ip}")
+                active_hosts.append(ip)
     return active_hosts
 
-def active_subnets(base_subnets, threads=50):
+def active_subnets(base_subnets, threads=30, timeout=1.0):
     active_networks = []
     with ThreadPoolExecutor(max_workers=threads) as executor:
-        results = executor.map(ping_subnet_start, base_subnets)
+        results = executor.map(lambda subnet: ping_subnet_start(subnet, timeout=timeout), base_subnets)
     for subnet, status in results:
         if status:
             print(f"Trama de red detectada: {subnet}.0/24")
             active_networks.append(subnet)
     return active_networks
 
-def ping_subnet_start(subnet):
-    _, status = ping(f"{subnet}.1")
-    return subnet, status
+def ping_subnet_start(subnet, timeout=1.0):
+    probe_hosts = [1, 254, 100, 50, 10, 200]
+    for host in probe_hosts:
+        _, status = ping(f"{subnet}.{host}", timeout=timeout)
+        if status:
+            return subnet, True
+    return subnet, False
 
 def generate_html_report(subnets, hosts):
     total_hosts = sum(len(hosts[subnet]) for subnet in subnets)
+    total_hosts_for_chart = total_hosts if total_hosts else 1
     template = """
     <html>
     <head>
@@ -134,7 +147,7 @@ def generate_html_report(subnets, hosts):
                     labels: [{% for subnet in subnets %}"{{ subnet }}",{% endfor %}],
                     datasets: [{
                         label: 'Porcentaje de Hosts',
-                        data: [{% for subnet in subnets %}{{ (hosts[subnet]|length / total_hosts) * 100 }},{% endfor %}],
+                        data: [{% for subnet in subnets %}{{ (hosts[subnet]|length / total_hosts_for_chart) * 100 }},{% endfor %}],
                         backgroundColor: ['#4caf50', '#ff9800', '#2196f3', '#f44336']
                     }]
                 };
@@ -201,25 +214,86 @@ def generate_html_report(subnets, hosts):
     </html>
     """
     html_template = Template(template)
-    html_content = html_template.render(subnets=subnets, hosts=hosts, total_hosts=total_hosts)
+    html_content = html_template.render(
+        subnets=subnets,
+        hosts=hosts,
+        total_hosts=total_hosts,
+        total_hosts_for_chart=total_hosts_for_chart,
+    )
     with open("network_report.html", "w") as f:
         f.write(html_content)
     print("\n[+] Informe generado: network_report.html")
 
-if __name__ == "__main__":
-    private_subnets = [
-        f"10.{i}.0" for i in range(256)
-    ] + [
-        f"172.{i}.0" for i in range(16, 32)
-    ] + [
-        f"192.168.{i}" for i in range(256)
-    ]
+def build_subnet_list():
+    return (
+        [f"10.{i}.0" for i in range(256)]
+        + [f"172.{i}.0" for i in range(16, 32)]
+        + [f"192.168.{i}" for i in range(256)]
+    )
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Descubre tramas de red y hosts activos")
+    parser.add_argument(
+        "--mode",
+        choices=["subnets", "full"],
+        default="full",
+        help="Escanear solo tramas o tramas y hosts",
+    )
+    parser.add_argument(
+        "--subnet-threads",
+        type=int,
+        default=30,
+        help="Número máximo de hilos para descubrir tramas",
+    )
+    parser.add_argument(
+        "--host-threads",
+        type=int,
+        default=20,
+        help="Número máximo de hilos para el escaneo de hosts",
+    )
+    parser.add_argument(
+        "--ping-timeout",
+        type=float,
+        default=1.0,
+        help="Tiempo máximo de espera para cada ping",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="Retraso opcional entre pings para evitar saturación",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_arguments()
+    private_subnets = build_subnet_list()
 
     print("\n[+] Escaneando tramas de red...\n")
-    active_subnets_list = active_subnets(private_subnets)
-    all_subnets = set(active_subnets_list)
-    subnet_hosts = {}
-    for subnet in all_subnets:
-        print(f"\n[+] Escaneando hosts en {subnet}.0/24...\n")
-        subnet_hosts[subnet] = ping_subnet(subnet)
+    active_subnets_list = active_subnets(
+        private_subnets, threads=args.subnet_threads, timeout=args.ping_timeout
+    )
+    all_subnets = sorted(set(active_subnets_list))
+    subnet_hosts = {subnet: [] for subnet in all_subnets}
+
+    if args.mode == "full":
+        for subnet in all_subnets:
+            print(f"\n[+] Escaneando hosts en {subnet}.0/24...\n")
+            subnet_hosts[subnet] = ping_subnet(
+                subnet,
+                timeout=args.ping_timeout,
+                max_workers=args.host_threads,
+                delay=args.delay,
+            )
+
+    if not all_subnets:
+        print("No se detectaron tramas activas.")
+        return
+
     generate_html_report(all_subnets, subnet_hosts)
+
+
+if __name__ == "__main__":
+    main()
