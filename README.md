@@ -36,3 +36,37 @@ El informe es visualmente atractivo y organizado para facilitar el análisis.
   pip3 install -r requirements.txt
   sudo python3 pingmapper.py
   ```
+
+## Ejemplos de uso según la sensibilidad de la red
+
+### Redes extremadamente sensibles
+
+- **Comando:**
+  ```bash
+  sudo python3 pingmapper.py --mode subnets --subnet-threads 1 --ping-timeout 2
+  ```
+- **Repeticiones y ritmo:** hasta 6 pings secuenciales por trama candidata (hosts 1, 254, 100, 50, 10 y 200) con un tiempo máximo de 2 s por intento, es decir, un barrido de aproximadamente 12 s por trama.
+
+### Redes sensibles
+
+- **Comando:**
+  ```bash
+  sudo python3 pingmapper.py --mode full --subnet-threads 2 --host-threads 4 --ping-timeout 1.5 --delay 1.0
+  ```
+- **Repeticiones y ritmo:** descubrimiento de tramas con hasta 6 pings por trama en dos hilos y exploración de hosts con un único ping por dirección, aplicando 1 s de espera entre resultados; en la práctica se generan unas 60 solicitudes por minuto repartidas entre los 4 hilos de hosts.
+
+### Redes normales
+
+- **Comando:**
+  ```bash
+  sudo python3 pingmapper.py --mode full --subnet-threads 10 --host-threads 10 --ping-timeout 1.0 --delay 0.2
+  ```
+- **Repeticiones y ritmo:** escaneo simultáneo de hasta 10 tramas y 10 hosts por tanda, manteniendo el retraso total en torno a 0.2 s entre pings; se alcanzan aproximadamente 300 solicitudes por minuto sin saturar redes de uso general.
+
+### Redes buenas
+
+- **Comando:**
+  ```bash
+  sudo python3 pingmapper.py --mode full --subnet-threads 30 --host-threads 20 --ping-timeout 0.7
+  ```
+- **Repeticiones y ritmo:** paralelismo completo tanto en la detección de tramas (30 hilos) como en el escaneo de hosts (20 hilos), enviando un único ping por host sin demoras adicionales; pueden emitirse varios cientos de solicitudes por minuto sin afectar redes robustas.
