@@ -1,72 +1,81 @@
 # PingMapper
 
-PingMapper escanea todas las tramas de una red privada y detecta los hosts activos en cada una. Con esta información, genera un informe en HTML que puede visualizarse fácilmente iniciando un servidor con Python:
+Herramienta de descubrimiento de red para auditorias. Detecta todas las tramas y hosts activos de una red privada, lanza nmap sobre los hosts descubiertos y genera:
 
-- Tramas de red detectadas.
-- Hosts encontrados en cada trama.
-- Gráficos de representación (número de hosts y porcentaje).
+- `ips_trama_X.X.X.0.txt` — lista de IPs activas por subred
+- `trama_X.X.X.0.xml` — resultado nmap en XML para importar en **pentest.ws**
+- `network_report.html` — informe visual con hosts, puertos abiertos y servicios detectados
 
-## ¿Cómo funciona?
+## Instalacion
 
-1. **Escaneo de subredes**: 
-   La herramienta escanea las subredes privadas más comunes (10.0.0.0/8, 172.16.0.0/12 y 192.168.0.0/16).
-   
-2. **Detección de hosts activos**:
-   Envía pings a cada IP dentro de las subredes para identificar dispositivos activos.
+```bash
+git clone https://github.com/M4nuTCP/PingMapper.git
+cd PingMapper
+pip3 install -r requirements.txt
+```
 
-3. **Generación de informe**:
-   Al finalizar el escaneo, se genera un archivo HTML que contiene:
-   - Tramas de red activas detectadas.
-   - Hosts activos en cada trama.
-   - Gráficos para visualizar la cantidad y proporción de hosts.
+Requiere nmap instalado:
+```bash
+sudo apt install nmap
+```
 
-El informe es visualmente atractivo y organizado para facilitar el análisis.
+## Uso basico
 
-![Captura de pantalla 2024-12-04 174647](https://github.com/user-attachments/assets/7191b565-8eb9-4834-88ba-a31a99bd73bb)
+```bash
+sudo python3 pingmapper.py
+```
 
-![Captura de pantalla 2024-12-04 174735](https://github.com/user-attachments/assets/825da324-8cdd-4f3f-88ac-685386d22d76)
+Esto ejecuta un descubrimiento completo con configuracion conservadora (min-rate 1000) apta para redes empresariales.
 
-![Captura de pantalla 2024-12-04 182939](https://github.com/user-attachments/assets/b525cc3f-5c9a-4c3c-88d4-04fa9c34eec1)
+## Opciones
 
-## Instalación
+| Flag | Default | Descripcion |
+|---|---|---|
+| `--nmap-rate` | 1000 | `--min-rate` de nmap. 500=sensible, 1000=normal, 5000=agresivo |
+| `--skip-nmap` | — | Solo ping sweep, sin lanzar nmap |
+| `--output-dir` | `.` | Directorio donde guardar XMLs, TXTs e HTML |
+| `--subnet-threads` | 30 | Hilos para deteccion de tramas |
+| `--host-threads` | 20 | Hilos para ping sweep de hosts |
+| `--ping-timeout` | 1.0 | Timeout por ping (segundos) |
+| `--delay` | 0.0 | Retardo entre pings (segundos) |
+| `--mode` | full | `subnets` = solo tramas, `full` = tramas + hosts |
 
-  ```bash
-  git clone https://github.com/M4nuTCP/PingMapper.git
-  cd PingMapper
-  pip3 install -r requirements.txt
-  sudo python3 pingmapper.py
-  ```
+## Ejemplos segun sensibilidad de la red
 
-## Ejemplos de uso según la sensibilidad de la red
+### Red empresarial critica (no saturar bajo ninguna circunstancia)
+```bash
+sudo python3 pingmapper.py --nmap-rate 500 --subnet-threads 5 --host-threads 5 --delay 0.2 --ping-timeout 2.0
+```
 
-### Redes extremadamente sensibles
+### Red empresarial normal
+```bash
+sudo python3 pingmapper.py --nmap-rate 1000 --subnet-threads 10 --host-threads 10 --delay 0.1
+```
 
-- **Comando:**
-  ```bash
-  sudo python3 pingmapper.py --mode subnets --subnet-threads 1 --ping-timeout 2
-  ```
-- **Repeticiones y ritmo:** hasta 6 pings secuenciales por trama candidata (hosts 1, 254, 100, 50, 10 y 200) con un tiempo máximo de 2 s por intento, es decir, un barrido de aproximadamente 12 s por trama.
+### Red robusta / pentest sin restricciones
+```bash
+sudo python3 pingmapper.py --nmap-rate 5000 --subnet-threads 30 --host-threads 20
+```
 
-### Redes sensibles
+### Solo descubrimiento, sin nmap
+```bash
+sudo python3 pingmapper.py --skip-nmap --output-dir /tmp/auditoria
+```
 
-- **Comando:**
-  ```bash
-  sudo python3 pingmapper.py --mode full --subnet-threads 2 --host-threads 4 --ping-timeout 1.5 --delay 1.0
-  ```
-- **Repeticiones y ritmo:** descubrimiento de tramas con hasta 6 pings por trama en dos hilos y exploración de hosts con un único ping por dirección, aplicando 1 s de espera entre resultados; en la práctica se generan unas 60 solicitudes por minuto repartidas entre los 4 hilos de hosts.
+### Guardar todo en un directorio especifico
+```bash
+sudo python3 pingmapper.py --nmap-rate 1000 --output-dir /tmp/cliente_2025
+```
 
-### Redes normales
+## Flujo de trabajo en auditoria
 
-- **Comando:**
-  ```bash
-  sudo python3 pingmapper.py --mode full --subnet-threads 10 --host-threads 10 --ping-timeout 1.0 --delay 0.2
-  ```
-- **Repeticiones y ritmo:** escaneo simultáneo de hasta 10 tramas y 10 hosts por tanda, manteniendo el retraso total en torno a 0.2 s entre pings; se alcanzan aproximadamente 300 solicitudes por minuto sin saturar redes de uso general.
+1. Ejecutar PingMapper en la red objetivo
+2. Revisar `network_report.html` para el informe inicial
+3. Importar los archivos `trama_*.xml` en [pentest.ws](https://pentest.ws) para el reporte formal
 
-### Redes buenas
+## Notas sobre seguridad de la red
 
-- **Comando:**
-  ```bash
-  sudo python3 pingmapper.py --mode full --subnet-threads 30 --host-threads 20 --ping-timeout 0.7
-  ```
-- **Repeticiones y ritmo:** paralelismo completo tanto en la detección de tramas (30 hilos) como en el escaneo de hosts (20 hilos), enviando un único ping por host sin demoras adicionales; pueden emitirse varios cientos de solicitudes por minuto sin afectar redes robustas.
+- `--nmap-rate 1000` (default) envia ~1000 paquetes/segundo por subred. En la gran mayoria de redes empresariales esto no genera impacto perceptible.
+- `--nmap-rate 500` + `--delay 0.1` para entornos con IDS/IPS sensibles o redes legacy.
+- `-p-` escanea los 65535 puertos. Si el tiempo es un factor, puedes limitar con `--nmap-extra-args` modificando el script.
+- El escaneo nmap se lanza **secuencialmente por subred**, nunca en paralelo, para no multiplicar la carga.
