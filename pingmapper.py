@@ -8,6 +8,7 @@ import argparse
 import os
 import platform
 import subprocess
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -19,7 +20,6 @@ from jinja2 import Template
 
 # --------------------------------------------------------------------------- #
 # Perfiles de velocidad                                                         #
-# Cada parametro puede sobreescribirse individualmente con flags CLI.           #
 # --------------------------------------------------------------------------- #
 
 PROFILES = {
@@ -28,7 +28,7 @@ PROFILES = {
         "subnet_threads":     2,
         "host_threads":       2,
         "ping_timeout":       2.0,
-        "ping_rate":          5,       # pings/segundo globales en el sweep
+        "ping_rate":          5,
         "delay":              0.5,
         "nmap_min_rate":      50,
         "nmap_max_rate":      100,
@@ -87,30 +87,103 @@ PROFILES = {
 
 
 # --------------------------------------------------------------------------- #
-# Token Bucket - limita la tasa global de pings entre todos los hilos          #
+# Display en vivo                                                               #
+# --------------------------------------------------------------------------- #
+
+class Live:
+    """
+    Separa el output en dos capas:
+      - log()    : lineas permanentes que suben (hallazgos, eventos)
+      - status() : una sola linea al final que se sobreescribe en cada tick
+    """
+
+    def __init__(self):
+        self._has_status = False
+        self._lock = threading.Lock()
+
+    def log(self, msg: str):
+        """Imprime una linea permanente, limpiando el status anterior."""
+        with self._lock:
+            if self._has_status:
+                sys.stdout.write("\r\033[K")
+            print(msg)
+            self._has_status = False
+
+    def status(self, msg: str):
+        """Sobreescribe la linea de estado actual."""
+        with self._lock:
+            # Trunca si es mas ancho que el terminal para no romper el formato
+            try:
+                cols = os.get_terminal_size().columns - 1
+            except OSError:
+                cols = 100
+            if len(msg) > cols:
+                msg = msg[:cols - 3] + "..."
+            sys.stdout.write(f"\r\033[K{msg}")
+            sys.stdout.flush()
+            self._has_status = True
+
+    def clear(self):
+        """Borra la linea de estado."""
+        with self._lock:
+            if self._has_status:
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                self._has_status = False
+
+    def section(self, title: str):
+        """Cabecera de seccion."""
+        self.clear()
+        self.log(f"\n{'─' * 50}")
+        self.log(f"  {title}")
+        self.log(f"{'─' * 50}")
+
+
+class Counter:
+    """Contador thread-safe."""
+
+    def __init__(self):
+        self._v = 0
+        self._lock = threading.Lock()
+
+    def inc(self) -> int:
+        with self._lock:
+            self._v += 1
+            return self._v
+
+    @property
+    def value(self) -> int:
+        return self._v
+
+
+def pbar(done: int, total: int, width: int = 22) -> str:
+    """Barra de progreso ASCII simple."""
+    pct = done / total if total else 0
+    filled = int(width * pct)
+    bar = "█" * filled + "░" * (width - filled)
+    return f"[{bar}] {done}/{total}"
+
+
+# --------------------------------------------------------------------------- #
+# Token Bucket                                                                  #
 # --------------------------------------------------------------------------- #
 
 class TokenBucket:
-    """
-    Limita la tasa de operaciones a `rate` por segundo de forma thread-safe.
-    Todos los hilos de ping comparten la misma instancia para que el limite
-    sea global y no por hilo.
-    """
+    """Limita la tasa global de pings entre todos los hilos."""
 
     def __init__(self, rate: float):
-        self.rate = float(rate)
-        self.tokens = float(rate)
-        self.max_tokens = float(rate)
-        self.last_refill = time.monotonic()
-        self._lock = threading.Lock()
+        self.rate      = float(rate)
+        self.tokens    = float(rate)
+        self.max_tokens= float(rate)
+        self.last      = time.monotonic()
+        self._lock     = threading.Lock()
 
     def acquire(self):
         while True:
             with self._lock:
                 now = time.monotonic()
-                elapsed = now - self.last_refill
-                self.tokens = min(self.max_tokens, self.tokens + elapsed * self.rate)
-                self.last_refill = now
+                self.tokens = min(self.max_tokens, self.tokens + (now - self.last) * self.rate)
+                self.last = now
                 if self.tokens >= 1.0:
                     self.tokens -= 1.0
                     return
@@ -125,129 +198,147 @@ class TokenBucket:
 def ping(ip: str, timeout: float = 1.0, bucket: TokenBucket = None) -> tuple:
     if bucket:
         bucket.acquire()
-    param = "-n" if platform.system().lower() == "windows" else "-c"
+    is_win = platform.system().lower() == "windows"
+    cmd = ["ping", "-n" if is_win else "-c", "1",
+           "-w" if is_win else "-W",
+           str(int(timeout * 1000) if not is_win else int(timeout)),
+           ip]
     try:
-        result = subprocess.run(
-            ["ping", param, "1", "-W", str(int(timeout * 1000 if platform.system().lower() != "windows" else timeout)), ip],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout + 0.5,
-        )
-        return ip, result.returncode == 0
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=timeout + 0.5)
+        return ip, r.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return ip, False
 
 
-def ping_subnet(subnet: str, timeout: float, max_workers: int, delay: float, bucket: TokenBucket) -> list:
-    ip_range = [f"{subnet}.{i}" for i in range(1, 255)]
-    active_hosts = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = list(executor.map(
-            lambda ip: ping(ip, timeout=timeout, bucket=bucket), ip_range
-        ))
-    for ip, status in results:
-        if status:
-            if delay:
-                time.sleep(delay)
-            print(f"  [+] {ip}")
-            active_hosts.append(ip)
-    return active_hosts
-
-
 def ping_subnet_start(subnet: str, timeout: float, bucket: TokenBucket) -> tuple:
-    """Sondea 6 IPs representativas para ver si la trama esta activa."""
     for host in [1, 254, 100, 50, 10, 200]:
-        _, status = ping(f"{subnet}.{host}", timeout=timeout, bucket=bucket)
-        if status:
+        _, ok = ping(f"{subnet}.{host}", timeout=timeout, bucket=bucket)
+        if ok:
             return subnet, True
     return subnet, False
 
 
-def active_subnets(base_subnets: list, threads: int, timeout: float, bucket: TokenBucket) -> list:
-    active = []
-    with ThreadPoolExecutor(max_workers=threads) as executor:
-        results = list(executor.map(
-            lambda s: ping_subnet_start(s, timeout=timeout, bucket=bucket), base_subnets
-        ))
-    for subnet, status in results:
-        if status:
-            print(f"[+] Trama detectada: {subnet}.0/24")
-            active.append(subnet)
-    return active
+def active_subnets(base_subnets: list, threads: int, timeout: float,
+                   bucket: TokenBucket, live: Live) -> list:
+    total   = len(base_subnets)
+    checked = Counter()
+    found   = Counter()
+
+    def probe(subnet):
+        result = ping_subnet_start(subnet, timeout=timeout, bucket=bucket)
+        n = checked.inc()
+        if result[1]:
+            found.inc()
+            live.log(f"  [+] Trama activa: {subnet}.0/24")
+        live.status(f"  Tramas  {pbar(n, total)}  {found.value} activas encontradas")
+        return result
+
+    with ThreadPoolExecutor(max_workers=threads) as ex:
+        results = list(ex.map(probe, base_subnets))
+
+    live.clear()
+    return [s for s, ok in results if ok]
+
+
+def ping_subnet(subnet: str, timeout: float, max_workers: int,
+                delay: float, bucket: TokenBucket, live: Live) -> list:
+    ip_range   = [f"{subnet}.{i}" for i in range(1, 255)]
+    total      = len(ip_range)
+    scanned    = Counter()
+    found_cnt  = Counter()
+    found_ips  = []
+    _lock      = threading.Lock()
+
+    def scan(ip):
+        _, ok = ping(ip, timeout=timeout, bucket=bucket)
+        n = scanned.inc()
+        if ok:
+            found_cnt.inc()
+            live.log(f"    [+] {ip}")
+            with _lock:
+                found_ips.append(ip)
+            if delay:
+                time.sleep(delay)
+        live.status(f"  Hosts   {pbar(n, total, 22)}  {found_cnt.value} activos  [{subnet}.0/24]")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        list(ex.map(scan, ip_range))
+
+    live.clear()
+    return sorted(found_ips, key=lambda ip: int(ip.split(".")[-1]))
 
 
 # --------------------------------------------------------------------------- #
 # Nmap                                                                          #
 # --------------------------------------------------------------------------- #
 
-def save_ips_to_file(subnet: str, hosts: list, output_dir: str) -> str:
+def save_ips_to_file(subnet: str, hosts: list, output_dir: str, live: Live) -> str:
     path = os.path.join(output_dir, f"ips_trama_{subnet}.0.txt")
     with open(path, "w") as f:
         f.write("\n".join(hosts) + "\n")
-    print(f"[+] IPs guardadas: {path}")
+    live.log(f"  [+] IPs guardadas: {path}")
     return path
 
 
 def build_nmap_cmd(ips_file: str, xml_output: str, cfg: dict) -> list:
-    """
-    Construye el comando nmap con todos los controles de rate/trafico.
-
-    Flags clave para no saturar la red:
-      --max-rate        : techo absoluto de paquetes/segundo (mas importante que min-rate)
-      --max-parallelism : max sondas simultaneas pendientes de respuesta
-      --max-retries     : reenvios por puerto (default nmap=10, aqui 1-3)
-                          Con --max-retries 1 se reduce el trafico hasta un 80%
-                          en redes con perdida de paquetes
-      --max-rtt-timeout : tiempo maximo de espera por respuesta antes de
-                          pasar al siguiente puerto (evita bloqueos en hosts lentos)
-      --initial-rtt-timeout: estimacion RTT inicial mas conservadora
-      --host-timeout    : abandona un host si tarda mas de X (no se queda colgado)
-      -Pn               : no envia pings de descubrimiento nmap (ya los hicimos nosotros)
-      -n                : sin resolucion DNS (ahorra trafico y tiempo)
-    """
     return [
         "nmap",
-        "-p-",                                         # todos los puertos
-        "-sS",                                         # SYN scan (half-open, mas silencioso)
-        "-sV",                                         # version de servicio
-        "--open",                                      # solo puertos abiertos en el XML
-        "-n",                                          # sin DNS
-        "-Pn",                                         # skip host discovery (ya se hizo)
-        "--min-rate",        str(cfg["nmap_min_rate"]),
-        "--max-rate",        str(cfg["nmap_max_rate"]),    # TECHO de paquetes/s
-        "--max-parallelism", str(cfg["nmap_parallelism"]), # max sondas simultaneas
-        "--max-retries",     str(cfg["nmap_retries"]),     # reintentos por puerto
-        "--max-rtt-timeout", cfg["nmap_max_rtt"],          # RTT maximo por sonda
-        "--initial-rtt-timeout", cfg["nmap_init_rtt"],     # RTT inicial estimado
-        "--host-timeout",    cfg["nmap_host_timeout"],     # timeout total por host
+        "-p-", "-sS", "-sV", "--open", "-n", "-Pn",
+        "--min-rate",            str(cfg["nmap_min_rate"]),
+        "--max-rate",            str(cfg["nmap_max_rate"]),
+        "--max-parallelism",     str(cfg["nmap_parallelism"]),
+        "--max-retries",         str(cfg["nmap_retries"]),
+        "--max-rtt-timeout",     cfg["nmap_max_rtt"],
+        "--initial-rtt-timeout", cfg["nmap_init_rtt"],
+        "--host-timeout",        cfg["nmap_host_timeout"],
         "-oX", xml_output,
         "-iL", ips_file,
     ]
 
 
-def run_nmap(subnet: str, ips_file: str, output_dir: str, cfg: dict) -> str | None:
+def run_nmap(subnet: str, ips_file: str, output_dir: str,
+             cfg: dict, live: Live) -> str | None:
     xml_output = os.path.join(output_dir, f"trama_{subnet}.0.xml")
     cmd = build_nmap_cmd(ips_file, xml_output, cfg)
-
-    print(f"\n[*] Nmap -> {subnet}.0/24")
-    print(f"    max-rate={cfg['nmap_max_rate']} pps | parallelism={cfg['nmap_parallelism']} | retries={cfg['nmap_retries']}")
-    print(f"    {' '.join(cmd)}\n")
+    live.log(f"  [*] nmap {subnet}.0/24  max-rate={cfg['nmap_max_rate']} | retries={cfg['nmap_retries']}")
 
     try:
-        proc = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
-        if proc.returncode == 0:
-            print(f"[+] Nmap completado -> {xml_output}")
-        else:
-            print(f"[!] Nmap termino con codigo {proc.returncode}")
-            print((proc.stdout or "")[-2000:])
     except FileNotFoundError:
-        print("[!] nmap no encontrado. Instala con: sudo apt install nmap")
+        live.log("[!] nmap no encontrado. Instala con: sudo apt install nmap")
         return None
+
+    # Consume stdout en hilo separado para no bloquear la pipe
+    output_lines = []
+    def _drain():
+        for line in proc.stdout:
+            output_lines.append(line)
+    drain = threading.Thread(target=_drain, daemon=True)
+    drain.start()
+
+    spinner = ["|", "/", "-", "\\"]
+    start   = time.time()
+    i       = 0
+    while proc.poll() is None:
+        elapsed = int(time.time() - start)
+        live.status(f"  {spinner[i % 4]}  Nmap corriendo en {subnet}.0/24 ... {elapsed}s")
+        i += 1
+        time.sleep(0.15)
+
+    drain.join()
+    live.clear()
+    elapsed = int(time.time() - start)
+
+    if proc.returncode == 0:
+        live.log(f"  [+] Nmap completado en {elapsed}s  ->  {xml_output}")
+    else:
+        live.log(f"  [!] Nmap error (codigo {proc.returncode})")
+        tail = "".join(output_lines[-10:])
+        if tail.strip():
+            live.log(tail.strip())
 
     return xml_output if os.path.exists(xml_output) else None
 
@@ -269,13 +360,13 @@ def parse_nmap_xml(xml_file: str) -> dict:
             addr = host.find("address[@addrtype='ipv4']")
             if addr is None:
                 continue
-            ip = addr.get("addr")
+            ip    = addr.get("addr")
             ports = []
             ports_elem = host.find("ports")
             if ports_elem is not None:
                 for port in ports_elem.findall("port"):
-                    state_elem = port.find("state")
-                    if state_elem is None or state_elem.get("state") != "open":
+                    se = port.find("state")
+                    if se is None or se.get("state") != "open":
                         continue
                     svc = port.find("service")
                     ports.append({
@@ -469,7 +560,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </html>"""
 
 
-def generate_html_report(subnets, hosts, nmap_data, profile, output_dir="."):
+def generate_html_report(subnets, hosts, nmap_data, profile, output_dir, live):
     total_hosts = sum(len(hosts[s]) for s in subnets)
     total_open_ports = sum(
         nmap_data.get(s, {}).get(ip, {}).get("port_count", 0)
@@ -484,7 +575,7 @@ def generate_html_report(subnets, hosts, nmap_data, profile, output_dir="."):
     path = os.path.join(output_dir, "network_report.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"[+] Informe HTML: {path}")
+    live.log(f"  [+] HTML: {path}")
 
 
 # --------------------------------------------------------------------------- #
@@ -511,66 +602,59 @@ def parse_arguments():
         description="PingMapper - Descubrimiento de red + nmap para auditorias",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Perfiles disponibles:
+Perfiles:
 {profile_help}
 
 Ejemplos:
   sudo python3 pingmapper.py --profile safe
   sudo python3 pingmapper.py --profile normal
   sudo python3 pingmapper.py --profile aggressive
-  sudo python3 pingmapper.py --profile safe --nmap-max-rate 300   # override puntual
+  sudo python3 pingmapper.py --profile safe --nmap-max-rate 300
   sudo python3 pingmapper.py --skip-nmap --output-dir /tmp/cliente
         """,
     )
     parser.add_argument("--profile", choices=PROFILES.keys(), default="normal",
-                        help="Perfil de velocidad/agresividad (default: normal)")
+                        help="Perfil de velocidad (default: normal)")
     parser.add_argument("--mode", choices=["subnets", "full"], default="full",
                         help="subnets=solo tramas, full=tramas+hosts (default: full)")
     parser.add_argument("--skip-nmap", action="store_true",
-                        help="Omitir escaneo nmap (solo ping sweep)")
+                        help="Omitir escaneo nmap")
     parser.add_argument("--output-dir", default=".",
                         help="Directorio de salida (default: .)")
 
-    # Overrides individuales (opcionales, sobreescriben el perfil)
     g = parser.add_argument_group("overrides del perfil (opcionales)")
-    g.add_argument("--subnet-threads", type=int)
-    g.add_argument("--host-threads",   type=int)
-    g.add_argument("--ping-timeout",   type=float)
-    g.add_argument("--ping-rate",      type=int,
-                   help="Pings/segundo maximos globales en el sweep")
-    g.add_argument("--delay",          type=float)
-    g.add_argument("--nmap-min-rate",  type=int)
-    g.add_argument("--nmap-max-rate",  type=int,
-                   help="Techo absoluto de paquetes/segundo en nmap")
-    g.add_argument("--nmap-parallelism", type=int,
-                   help="Max sondas simultaneas en nmap")
-    g.add_argument("--nmap-retries",   type=int,
-                   help="Reintentos por puerto (1 = minimo trafico)")
-    g.add_argument("--nmap-max-rtt",   type=str)
-    g.add_argument("--nmap-init-rtt",  type=str)
+    g.add_argument("--subnet-threads",    type=int)
+    g.add_argument("--host-threads",      type=int)
+    g.add_argument("--ping-timeout",      type=float)
+    g.add_argument("--ping-rate",         type=int)
+    g.add_argument("--delay",             type=float)
+    g.add_argument("--nmap-min-rate",     type=int)
+    g.add_argument("--nmap-max-rate",     type=int)
+    g.add_argument("--nmap-parallelism",  type=int)
+    g.add_argument("--nmap-retries",      type=int)
+    g.add_argument("--nmap-max-rtt",      type=str)
+    g.add_argument("--nmap-init-rtt",     type=str)
     g.add_argument("--nmap-host-timeout", type=str)
-
     return parser.parse_args()
 
 
 def build_config(args) -> dict:
-    """Parte del perfil y aplica los overrides que el usuario haya especificado."""
     cfg = dict(PROFILES[args.profile])
-    overrides = {
-        "subnet_threads":    args.subnet_threads,
-        "host_threads":      args.host_threads,
-        "ping_timeout":      args.ping_timeout,
-        "ping_rate":         args.ping_rate,
-        "delay":             args.delay,
-        "nmap_min_rate":     args.nmap_min_rate,
-        "nmap_max_rate":     args.nmap_max_rate,
-        "nmap_parallelism":  args.nmap_parallelism,
-        "nmap_retries":      args.nmap_retries,
-        "nmap_max_rtt":      args.nmap_max_rtt,
-        "nmap_init_rtt":     args.nmap_init_rtt,
-        "nmap_host_timeout": args.nmap_host_timeout,
-    }
-    for key, val in overrides.items():
+    for key, attr in [
+        ("subnet_threads",    "subnet_threads"),
+        ("host_threads",      "host_threads"),
+        ("ping_timeout",      "ping_timeout"),
+        ("ping_rate",         "ping_rate"),
+        ("delay",             "delay"),
+        ("nmap_min_rate",     "nmap_min_rate"),
+        ("nmap_max_rate",     "nmap_max_rate"),
+        ("nmap_parallelism",  "nmap_parallelism"),
+        ("nmap_retries",      "nmap_retries"),
+        ("nmap_max_rtt",      "nmap_max_rtt"),
+        ("nmap_init_rtt",     "nmap_init_rtt"),
+        ("nmap_host_timeout", "nmap_host_timeout"),
+    ]:
+        val = getattr(args, attr, None)
         if val is not None:
             cfg[key] = val
     return cfg
@@ -583,71 +667,78 @@ def build_config(args) -> dict:
 def main():
     args = parse_arguments()
     cfg  = build_config(args)
+    live = Live()
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"\n[+] Perfil: {args.profile} — {PROFILES[args.profile]['description']}")
-    print(f"    ping-rate={cfg['ping_rate']}/s | subnet-threads={cfg['subnet_threads']} | host-threads={cfg['host_threads']}")
+    live.log(f"\nPingMapper  |  perfil: {args.profile}  |  {PROFILES[args.profile]['description']}")
     if not args.skip_nmap:
-        print(f"    nmap: min-rate={cfg['nmap_min_rate']} max-rate={cfg['nmap_max_rate']} "
-              f"parallelism={cfg['nmap_parallelism']} retries={cfg['nmap_retries']}\n")
+        live.log(f"nmap: max-rate={cfg['nmap_max_rate']} pps | parallelism={cfg['nmap_parallelism']} | retries={cfg['nmap_retries']}")
 
-    # Token bucket global compartido por todos los hilos de ping
+    # ── Fase 1: detectar tramas activas ─────────────────────────────────────
+    live.section("FASE 1 / 3  Detectando tramas de red")
     bucket = TokenBucket(rate=cfg["ping_rate"])
-
-    print("\n[+] Escaneando tramas de red privadas...\n")
     detected = active_subnets(
         build_subnet_list(),
         threads=cfg["subnet_threads"],
         timeout=cfg["ping_timeout"],
         bucket=bucket,
+        live=live,
     )
-    all_subnets = sorted(set(detected))
+    all_subnets  = sorted(set(detected))
     subnet_hosts = {s: [] for s in all_subnets}
 
     if not all_subnets:
-        print("[-] No se detectaron tramas activas.")
+        live.log("\n[-] No se detectaron tramas activas.")
         return
+    live.log(f"\n  {len(all_subnets)} trama(s) activa(s) encontrada(s).")
 
+    # ── Fase 2: hosts por trama ──────────────────────────────────────────────
     if args.mode == "full":
+        live.section("FASE 2 / 3  Escaneando hosts por trama")
         for subnet in all_subnets:
-            print(f"\n[+] Escaneando hosts en {subnet}.0/24...")
+            live.log(f"\n  [{subnet}.0/24]")
             subnet_hosts[subnet] = ping_subnet(
                 subnet,
                 timeout=cfg["ping_timeout"],
                 max_workers=cfg["host_threads"],
                 delay=cfg["delay"],
                 bucket=bucket,
+                live=live,
             )
+            live.log(f"  -> {len(subnet_hosts[subnet])} host(s) activo(s)")
 
+    # ── Fase 3: nmap ─────────────────────────────────────────────────────────
     nmap_results = {}
     xml_files    = {}
 
-    for subnet in all_subnets:
-        hosts = subnet_hosts[subnet]
-        if not hosts:
-            print(f"[-] Sin hosts activos en {subnet}.0/24, omitiendo nmap.")
-            nmap_results[subnet] = {}
-            continue
-
-        ips_file = save_ips_to_file(subnet, hosts, args.output_dir)
-
-        if not args.skip_nmap:
-            xml_file = run_nmap(subnet, ips_file, args.output_dir, cfg)
+    if not args.skip_nmap:
+        live.section("FASE 3 / 3  Escaneo nmap")
+        for subnet in all_subnets:
+            hosts = subnet_hosts[subnet]
+            if not hosts:
+                live.log(f"  [-] {subnet}.0/24 sin hosts, omitiendo.")
+                nmap_results[subnet] = {}
+                continue
+            ips_file = save_ips_to_file(subnet, hosts, args.output_dir, live)
+            xml_file = run_nmap(subnet, ips_file, args.output_dir, cfg, live)
             xml_files[subnet]    = xml_file
             nmap_results[subnet] = parse_nmap_xml(xml_file)
-        else:
+    else:
+        for subnet in all_subnets:
             nmap_results[subnet] = {}
 
-    print("\n[+] Generando informe HTML...")
-    generate_html_report(all_subnets, subnet_hosts, nmap_results, args.profile, args.output_dir)
+    # ── Informe ───────────────────────────────────────────────────────────────
+    live.section("Generando informe")
+    generate_html_report(all_subnets, subnet_hosts, nmap_results,
+                         args.profile, args.output_dir, live)
 
-    print("\n===== Archivos generados =====")
+    live.log("\n  ── Archivos generados ──────────────────────────────────")
     for subnet in all_subnets:
-        print(f"  {subnet}.0/24")
-        print(f"    IPs  -> {args.output_dir}/ips_trama_{subnet}.0.txt")
+        live.log(f"  {subnet}.0/24  ({len(subnet_hosts[subnet])} hosts)")
+        live.log(f"    IPs  ->  {args.output_dir}/ips_trama_{subnet}.0.txt")
         if not args.skip_nmap and xml_files.get(subnet):
-            print(f"    XML  -> {xml_files[subnet]}  (importar en pentest.ws)")
-    print(f"    HTML -> {args.output_dir}/network_report.html\n")
+            live.log(f"    XML  ->  {xml_files[subnet]}")
+    live.log(f"    HTML ->  {args.output_dir}/network_report.html\n")
 
 
 if __name__ == "__main__":
