@@ -7,6 +7,7 @@ Disenado para no saturar redes empresariales.
 import argparse
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import threading
@@ -189,6 +190,15 @@ class TokenBucket:
                     return
                 wait = (1.0 - self.tokens) / self.rate
             time.sleep(wait)
+
+
+# --------------------------------------------------------------------------- #
+# Comprobacion de dependencias                                                  #
+# --------------------------------------------------------------------------- #
+
+def check_nmap() -> bool:
+    """Comprueba si nmap esta disponible en el PATH."""
+    return shutil.which("nmap") is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -606,11 +616,12 @@ Perfiles:
 {profile_help}
 
 Ejemplos:
-  sudo python3 pingmapper.py --profile safe
-  sudo python3 pingmapper.py --profile normal
-  sudo python3 pingmapper.py --profile aggressive
-  sudo python3 pingmapper.py --profile safe --nmap-max-rate 300
-  sudo python3 pingmapper.py --skip-nmap --output-dir /tmp/cliente
+  sudo python3 pingmapper.py --profile safe --name auditoria_cliente
+  sudo python3 pingmapper.py --profile normal --name red_interna
+  sudo python3 pingmapper.py --profile aggressive --name lab_test
+  sudo python3 pingmapper.py --profile safe --nmap-max-rate 300 --name empresa_xyz
+  sudo python3 pingmapper.py --skip-nmap --name solo_discovery
+  sudo python3 pingmapper.py --output-dir /tmp --name cliente_2024
         """,
     )
     parser.add_argument("--profile", choices=PROFILES.keys(), default="normal",
@@ -620,7 +631,9 @@ Ejemplos:
     parser.add_argument("--skip-nmap", action="store_true",
                         help="Omitir escaneo nmap")
     parser.add_argument("--output-dir", default=".",
-                        help="Directorio de salida (default: .)")
+                        help="Directorio base de salida (default: .)")
+    parser.add_argument("--name", default=None,
+                        help="Nombre de la carpeta donde se guardan los resultados")
 
     g = parser.add_argument_group("overrides del perfil (opcionales)")
     g.add_argument("--subnet-threads",    type=int)
@@ -668,9 +681,30 @@ def main():
     args = parse_arguments()
     cfg  = build_config(args)
     live = Live()
-    os.makedirs(args.output_dir, exist_ok=True)
+
+    # ── Nombre de la carpeta de salida ───────────────────────────────────────
+    folder_name = args.name
+    if not folder_name:
+        try:
+            folder_name = input("\nNombre de la carpeta de resultados: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            folder_name = ""
+    if not folder_name:
+        folder_name = f"scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    output_dir = os.path.join(args.output_dir, folder_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # ── Comprobacion de nmap ─────────────────────────────────────────────────
+    if not args.skip_nmap:
+        if not check_nmap():
+            print("\n[!] nmap no esta instalado o no se encuentra en el PATH.")
+            print("[!] Instalalo con:  sudo apt install nmap")
+            print("[!] O usa --skip-nmap para omitir el escaneo nmap.\n")
+            sys.exit(1)
 
     live.log(f"\nPingMapper  |  perfil: {args.profile}  |  {PROFILES[args.profile]['description']}")
+    live.log(f"  Carpeta de salida: {output_dir}")
     if not args.skip_nmap:
         live.log(f"nmap: max-rate={cfg['nmap_max_rate']} pps | parallelism={cfg['nmap_parallelism']} | retries={cfg['nmap_retries']}")
 
@@ -707,6 +741,18 @@ def main():
             )
             live.log(f"  -> {len(subnet_hosts[subnet])} host(s) activo(s)")
 
+    # ── Guardar TXTs y generar HTML (antes de nmap) ──────────────────────────
+    live.section("Guardando IPs y generando informe HTML inicial")
+    ips_files = {}
+    for subnet in all_subnets:
+        hosts_list = subnet_hosts[subnet]
+        if hosts_list:
+            ips_files[subnet] = save_ips_to_file(subnet, hosts_list, output_dir, live)
+
+    generate_html_report(all_subnets, subnet_hosts, {},
+                         args.profile, output_dir, live)
+    live.log(f"  [i] Puedes abrir el HTML ahora; se actualizara al terminar nmap.")
+
     # ── Fase 3: nmap ─────────────────────────────────────────────────────────
     nmap_results = {}
     xml_files    = {}
@@ -714,31 +760,35 @@ def main():
     if not args.skip_nmap:
         live.section("FASE 3 / 3  Escaneo nmap")
         for subnet in all_subnets:
-            hosts = subnet_hosts[subnet]
-            if not hosts:
+            hosts_list = subnet_hosts[subnet]
+            if not hosts_list:
                 live.log(f"  [-] {subnet}.0/24 sin hosts, omitiendo.")
                 nmap_results[subnet] = {}
                 continue
-            ips_file = save_ips_to_file(subnet, hosts, args.output_dir, live)
-            xml_file = run_nmap(subnet, ips_file, args.output_dir, cfg, live)
+            ips_file = ips_files.get(subnet)
+            if not ips_file:
+                ips_file = save_ips_to_file(subnet, hosts_list, output_dir, live)
+            xml_file = run_nmap(subnet, ips_file, output_dir, cfg, live)
             xml_files[subnet]    = xml_file
             nmap_results[subnet] = parse_nmap_xml(xml_file)
     else:
         for subnet in all_subnets:
             nmap_results[subnet] = {}
 
-    # ── Informe ───────────────────────────────────────────────────────────────
-    live.section("Generando informe")
+    # ── Informe final (con datos nmap) ────────────────────────────────────────
+    live.section("Generando informe HTML final")
     generate_html_report(all_subnets, subnet_hosts, nmap_results,
-                         args.profile, args.output_dir, live)
+                         args.profile, output_dir, live)
 
     live.log("\n  ── Archivos generados ──────────────────────────────────")
+    live.log(f"  Carpeta: {output_dir}")
     for subnet in all_subnets:
         live.log(f"  {subnet}.0/24  ({len(subnet_hosts[subnet])} hosts)")
-        live.log(f"    IPs  ->  {args.output_dir}/ips_trama_{subnet}.0.txt")
+        if ips_files.get(subnet):
+            live.log(f"    IPs  ->  {ips_files[subnet]}")
         if not args.skip_nmap and xml_files.get(subnet):
             live.log(f"    XML  ->  {xml_files[subnet]}")
-    live.log(f"    HTML ->  {args.output_dir}/network_report.html\n")
+    live.log(f"    HTML ->  {os.path.join(output_dir, 'network_report.html')}\n")
 
 
 if __name__ == "__main__":
