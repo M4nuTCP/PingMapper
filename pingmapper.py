@@ -354,6 +354,62 @@ def run_nmap(subnet: str, ips_file: str, output_dir: str,
 
 
 # --------------------------------------------------------------------------- #
+# Merge XML nmap                                                                #
+# --------------------------------------------------------------------------- #
+
+def generate_all_ips_xml(xml_files: dict, output_dir: str, live: Live) -> str | None:
+    """Fusiona todos los XML de nmap por subred en un unico all_ips.xml."""
+    valid_files = [f for f in xml_files.values() if f and os.path.exists(f)]
+    if not valid_files:
+        live.log("  [-] No hay XMLs validos para generar all_ips.xml.")
+        return None
+
+    try:
+        first_root = ET.parse(valid_files[0]).getroot()
+    except ET.ParseError as e:
+        live.log(f"  [!] Error parseando XML base: {e}")
+        return None
+
+    merged = ET.Element("nmaprun", first_root.attrib)
+
+    for tag in ("scaninfo", "verbose", "debugging"):
+        elem = first_root.find(tag)
+        if elem is not None:
+            merged.append(elem)
+
+    total_hosts = 0
+    for xml_file in valid_files:
+        try:
+            root = ET.parse(xml_file).getroot()
+            for host in root.findall("host"):
+                merged.append(host)
+                total_hosts += 1
+        except ET.ParseError as e:
+            live.log(f"  [!] Error parseando {xml_file}: {e}")
+
+    runstats = ET.SubElement(merged, "runstats")
+    ET.SubElement(runstats, "finished",
+        time=str(int(time.time())),
+        timestr=datetime.now().strftime("%a %b %d %H:%M:%S %Y"),
+        elapsed="0",
+        summary=f"PingMapper merged scan; {total_hosts} hosts",
+        exit="success",
+    )
+    ET.SubElement(runstats, "hosts", up=str(total_hosts), down="0", total=str(total_hosts))
+
+    out_path = os.path.join(output_dir, "all_ips.xml")
+    tree = ET.ElementTree(merged)
+    ET.indent(tree, space="  ")
+    with open(out_path, "wb") as f:
+        f.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write(b'<!DOCTYPE nmaprun>\n')
+        tree.write(f, encoding="utf-8", xml_declaration=False)
+
+    live.log(f"  [+] all_ips.xml ({total_hosts} hosts): {out_path}")
+    return out_path
+
+
+# --------------------------------------------------------------------------- #
 # Parseo XML nmap                                                               #
 # --------------------------------------------------------------------------- #
 
@@ -775,6 +831,12 @@ def main():
         for subnet in all_subnets:
             nmap_results[subnet] = {}
 
+    # ── Generar all_ips.xml ───────────────────────────────────────────────────
+    all_xml_path = None
+    if not args.skip_nmap and xml_files:
+        live.section("Generando all_ips.xml")
+        all_xml_path = generate_all_ips_xml(xml_files, output_dir, live)
+
     # ── Informe final (con datos nmap) ────────────────────────────────────────
     live.section("Generando informe HTML final")
     generate_html_report(all_subnets, subnet_hosts, nmap_results,
@@ -788,7 +850,10 @@ def main():
             live.log(f"    IPs  ->  {ips_files[subnet]}")
         if not args.skip_nmap and xml_files.get(subnet):
             live.log(f"    XML  ->  {xml_files[subnet]}")
-    live.log(f"    HTML ->  {os.path.join(output_dir, 'network_report.html')}\n")
+    live.log(f"    HTML ->  {os.path.join(output_dir, 'network_report.html')}")
+    if all_xml_path:
+        live.log(f"    ALL  ->  {all_xml_path}")
+    live.log("")
 
 
 if __name__ == "__main__":
