@@ -457,23 +457,68 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PingMapper - Informe de Red</title>
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('pm-theme');
+    if (t !== 'dark' && t !== 'light') {
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
 <style>
 :root {
+  color-scheme: light;
   --bg:            #f4f5f7;
   --surface:       #ffffff;
-  --surface-2:     #fafbfc;
+  --surface-2:     #f6f7f9;
   --border:        #e5e8ed;
   --border-2:      #d3d8e0;
+  --border-hover:  #c2c8d2;
   --text:          #101828;
   --text-2:        #3a4256;
   --muted:         #667085;
   --primary:       #2456e6;
   --primary-strong:#1d47c4;
   --primary-soft:  #eef2fe;
+  --primary-border:#d6e0fb;
   --ok:            #17a34a;
+  --row-hover:     #f8f9fb;
+  --focus-ring:    rgba(36,86,230,.14);
+  --badge-green-bg:#ecfdf3; --badge-green-fg:#067647; --badge-green-bd:#abefc6;
+  --badge-grey-bg: #f2f4f7; --badge-grey-fg: #667085; --badge-grey-bd: #e4e7ec;
+  --toast-bg:      #101828; --toast-fg:#ffffff;
   --maxw:          1200px;
   --shadow:        0 1px 2px rgba(16,24,40,.06);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:            #0b0f17;
+  --surface:       #121826;
+  --surface-2:     #0e131e;
+  --border:        #222b3b;
+  --border-2:      #2c3648;
+  --border-hover:  #3a465c;
+  --text:          #eef1f6;
+  --text-2:        #c3cad6;
+  --muted:         #8a93a6;
+  --primary:       #5b82f6;
+  --primary-strong:#8aa6ff;
+  --primary-soft:  rgba(91,130,246,.14);
+  --primary-border:rgba(91,130,246,.36);
+  --ok:            #35c46a;
+  --row-hover:     rgba(255,255,255,.03);
+  --focus-ring:    rgba(91,130,246,.28);
+  --badge-green-bg:rgba(53,196,106,.14); --badge-green-fg:#4ade80; --badge-green-bd:rgba(53,196,106,.34);
+  --badge-grey-bg: rgba(138,147,166,.14); --badge-grey-fg:#9aa4b6; --badge-grey-bd:rgba(138,147,166,.28);
+  --toast-bg:      #eef1f6; --toast-fg:#0b0f17;
+  --shadow:        0 1px 2px rgba(0,0,0,.4);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
@@ -496,11 +541,23 @@ header {
 header h1 { font-size: 1.15em; font-weight: 700; letter-spacing: -.2px; color: var(--text); }
 header h1 span { color: var(--primary); }
 .subtitle { color: var(--muted); font-size: .75em; margin-top: 1px; }
+.header-right { display: flex; align-items: center; gap: 16px; }
+.theme-toggle {
+  display: inline-grid; place-items: center; width: 34px; height: 34px;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border-2); cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.theme-toggle:hover { background: var(--surface-2); border-color: var(--border-hover); color: var(--text); }
+.theme-toggle svg { display: block; }
+.theme-toggle .icon-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 .meta { text-align: right; font-size: .77em; color: var(--muted); line-height: 1.5; }
 .profile-badge {
   display: inline-block; margin-top: 3px;
-  background: var(--primary-soft); border: 1px solid #d6e0fb;
-  color: var(--primary-strong); font-size: .95em; border-radius: 6px; padding: 2px 9px; font-weight: 600;
+  background: var(--primary-soft); border: 1px solid var(--primary-border);
+  color: var(--primary-strong); font-size: .95em; padding: 2px 9px; font-weight: 600;
 }
 .author { color: var(--text-2); font-weight: 600; margin-top: 3px; }
 
@@ -510,7 +567,7 @@ header h1 span { color: var(--primary); }
 }
 .stat-card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: 10px; padding: 18px 20px; box-shadow: var(--shadow);
+  padding: 18px 20px; box-shadow: var(--shadow);
 }
 .stat-card .num { font-size: 1.9em; font-weight: 700; color: var(--text); line-height: 1; letter-spacing: -.5px; }
 .stat-card .lbl { font-size: .72em; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-top: 6px; font-weight: 600; }
@@ -519,31 +576,34 @@ header h1 span { color: var(--primary); }
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
   padding: 18px 32px; justify-content: space-between; max-width: var(--maxw); margin: 0 auto;
 }
+.filter-wrap { position: relative; display: flex; align-items: center; flex: 1; min-width: 220px; max-width: 420px; }
+.filter-ic { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
 .filter {
-  flex: 1; min-width: 220px; max-width: 420px;
+  width: 100%;
   background: var(--surface); border: 1px solid var(--border-2); color: var(--text);
-  border-radius: 8px; padding: 9px 13px; font-size: .9em;
+  padding: 9px 13px 9px 34px; font-size: .9em; font-family: inherit;
   transition: border-color .15s, box-shadow .15s;
 }
-.filter:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(36,86,230,.12); }
+.filter:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus-ring); }
 .filter::placeholder { color: var(--muted); }
 .toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--surface); color: var(--text-2);
-  border: 1px solid var(--border-2); border-radius: 8px;
+  border: 1px solid var(--border-2);
   padding: 8px 13px; font-size: .8em; font-weight: 600;
   cursor: pointer; transition: background .15s, border-color .15s, color .15s; font-family: inherit; white-space: nowrap;
 }
-.btn:hover { background: var(--surface-2); border-color: #c2c8d2; }
+.btn svg { flex-shrink: 0; }
+.btn:hover { background: var(--surface-2); border-color: var(--border-hover); }
 .btn:active { transform: translateY(.5px); }
 .btn-ghost { color: var(--primary); }
-.btn-ghost:hover { background: var(--primary-soft); border-color: #c7d3f7; color: var(--primary-strong); }
+.btn-ghost:hover { background: var(--primary-soft); border-color: var(--primary-border); color: var(--primary-strong); }
 
 .container { padding: 8px 32px 30px; max-width: var(--maxw); margin: 0 auto; }
 .subnet-block {
-  margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 12px; border: 1px solid var(--border);
   overflow: hidden; background: var(--surface); box-shadow: var(--shadow);
 }
 .subnet-header {
@@ -557,13 +617,13 @@ header h1 span { color: var(--primary); }
 .subnet-block.open > .subnet-header .chevron { transform: rotate(90deg); }
 .subnet-header h3 { color: var(--text); font-size: .95em; font-weight: 600; }
 .sn-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.badge { border-radius: 6px; padding: 3px 9px; font-size: .72em; font-weight: 600; letter-spacing: .2px; }
-.badge-green  { background: #ecfdf3; color: #067647; border: 1px solid #abefc6; }
-.badge-orange { background: var(--primary-soft); color: var(--primary-strong); border: 1px solid #d6e0fb; }
-.badge-grey   { background: #f2f4f7; color: #667085; border: 1px solid #e4e7ec; }
+.badge { padding: 3px 9px; font-size: .72em; font-weight: 600; letter-spacing: .2px; }
+.badge-green  { background: var(--badge-green-bg); color: var(--badge-green-fg); border: 1px solid var(--badge-green-bd); }
+.badge-orange { background: var(--primary-soft); color: var(--primary-strong); border: 1px solid var(--primary-border); }
+.badge-grey   { background: var(--badge-grey-bg); color: var(--badge-grey-fg); border: 1px solid var(--badge-grey-bd); }
 .subnet-body { display: none; padding: 12px 14px; background: var(--surface-2); border-top: 1px solid var(--border); }
 
-.host-block { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.host-block { margin-bottom: 8px; border: 1px solid var(--border); overflow: hidden; background: var(--surface); }
 .host-block:last-child { margin-bottom: 0; }
 .host-header {
   padding: 9px 14px; cursor: pointer;
@@ -573,7 +633,7 @@ header h1 span { color: var(--primary); }
 .host-header:hover { background: var(--surface-2); }
 .host-left { display: flex; align-items: center; gap: 10px; }
 .host-ip { color: var(--text); font-size: .9em; font-weight: 600; }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.dot { width: 7px; height: 7px; background: var(--ok); flex-shrink: 0; }
 .host-ports-body { display: none; padding: 10px 12px; background: var(--surface-2); border-top: 1px solid var(--border); }
 
 table.ports { width: 100%; border-collapse: collapse; font-size: .84em; }
@@ -583,14 +643,14 @@ table.ports th {
 }
 table.ports td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text-2); }
 table.ports tr:last-child td { border-bottom: none; }
-table.ports tbody tr:hover td { background: #f8f9fb; }
+table.ports tbody tr:hover td { background: var(--row-hover); }
 .p-num { color: var(--primary-strong); font-weight: 600; }
 .p-svc { color: var(--text); }
 .p-ver { color: var(--muted); }
 .no-data { color: var(--muted); font-size: .84em; padding: 6px 2px; }
 
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; padding: 16px 32px 40px; max-width: var(--maxw); margin: 0 auto; }
-.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; box-shadow: var(--shadow); }
+.chart-card { background: var(--surface); border: 1px solid var(--border); padding: 20px 22px; box-shadow: var(--shadow); }
 .chart-card h4 { color: var(--text); margin-bottom: 3px; font-size: .9em; font-weight: 600; }
 .chart-sub { color: var(--muted); font-size: .76em; margin-bottom: 16px; }
 .chart-wrap { position: relative; height: 280px; }
@@ -601,9 +661,9 @@ footer span { color: var(--primary); font-weight: 600; }
 
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(16px);
-  background: var(--text); color: #fff;
-  padding: 10px 18px; border-radius: 8px; font-size: .85em; font-weight: 500;
-  box-shadow: 0 6px 20px rgba(16,24,40,.18); opacity: 0; pointer-events: none;
+  background: var(--toast-bg); color: var(--toast-fg);
+  padding: 10px 18px; font-size: .85em; font-weight: 500;
+  box-shadow: 0 6px 20px rgba(0,0,0,.25); opacity: 0; pointer-events: none;
   transition: opacity .2s, transform .2s; z-index: 100;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -631,10 +691,16 @@ footer span { color: var(--primary); font-weight: 600; }
       <div class="subtitle">Network Discovery &amp; Audit Report</div>
     </div>
   </div>
-  <div class="meta">
-    <div>{{ scan_time }}</div>
-    <div><span class="profile-badge">perfil: {{ profile }}</span></div>
-    <div class="author">M4nuTCP</div>
+  <div class="header-right">
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Cambiar tema" title="Cambiar tema claro / oscuro">
+      <svg class="icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      <svg class="icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+    <div class="meta">
+      <div>{{ scan_time }}</div>
+      <div><span class="profile-badge">perfil: {{ profile }}</span></div>
+      <div class="author">M4nuTCP</div>
+    </div>
   </div>
 </header>
 
@@ -645,12 +711,15 @@ footer span { color: var(--primary); font-weight: 600; }
 </div>
 
 <div class="toolbar">
-  <input id="filter" class="filter" placeholder="&#128269; Filtrar por IP, puerto o servicio..." oninput="applyFilter(this.value)">
+  <div class="filter-wrap">
+    <svg class="filter-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input id="filter" class="filter" placeholder="Filtrar por IP, puerto o servicio..." oninput="applyFilter(this.value)">
+  </div>
   <div class="toolbar-actions">
     <button class="btn" onclick="expandAll(true)">Expandir todo</button>
     <button class="btn" onclick="expandAll(false)">Colapsar todo</button>
-    <button class="btn" onclick="copyAllIps()">&#128203; Copiar todas las IPs</button>
-    <button class="btn btn-ghost" onclick="downloadAllIps()">&#11015; Descargar todas .txt</button>
+    <button class="btn" onclick="copyAllIps()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>Copiar todas las IPs</button>
+    <button class="btn btn-ghost" onclick="downloadAllIps()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 4 5-4"/><path d="M5 20h14"/></svg>Descargar todas .txt</button>
   </div>
 </div>
 
@@ -664,8 +733,8 @@ footer span { color: var(--primary); font-weight: 600; }
         <span class="badge {% if hosts[subnet]|length %}badge-green{% else %}badge-grey{% endif %}">{{ hosts[subnet]|length }} hosts</span>
       </div>
       <div class="sn-actions">
-        <button class="btn" onclick="copyIps(event, this)" title="Copiar las IPs de esta trama">&#128203; Copiar IPs</button>
-        <button class="btn btn-ghost" onclick="downloadIps(event, this, '{{ subnet }}')" title="Descargar trama_ips_{{ subnet }}.0.txt">&#11015; .txt</button>
+        <button class="btn" onclick="copyIps(event, this)" title="Copiar las IPs de esta trama"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>Copiar IPs</button>
+        <button class="btn btn-ghost" onclick="downloadIps(event, this, '{{ subnet }}')" title="Descargar trama_ips_{{ subnet }}.0.txt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 4 5-4"/><path d="M5 20h14"/></svg>.txt</button>
       </div>
     </div>
     <div class="subnet-body" id="sn{{ loop.index }}">
@@ -826,41 +895,68 @@ function applyFilter(q) {
     if (q && body) { body.style.display = any ? 'block' : 'none'; sb.classList.toggle('open', any); }
   });
 }
-document.addEventListener('DOMContentLoaded', function () {
-  var labels = [{% for s in subnets %}"{{ s }}.0/24",{% endfor %}];
-  var counts = [{% for s in subnets %}{{ hosts[s]|length }},{% endfor %}];
-  if (!labels.length || typeof Chart === 'undefined') return;
-  var pal    = ['#2456e6','#6b5bd6','#0ea5b7','#5b8def','#9b6dd6','#2f9e78','#e08a2b','#dc5b7a'];
-  var colors = labels.map(function(_, i){ return pal[i % pal.length]; });
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('pm-theme', t); } catch (e) {}
+  renderCharts();
+}
+function toggleTheme() {
+  var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  applyTheme(cur === 'dark' ? 'light' : 'dark');
+}
+
+var CHART_LABELS = [{% for s in subnets %}"{{ s }}.0/24",{% endfor %}];
+var CHART_COUNTS = [{% for s in subnets %}{{ hosts[s]|length }},{% endfor %}];
+var _charts = [];
+function renderCharts() {
+  if (typeof Chart === 'undefined' || !CHART_LABELS.length) return;
+  var dark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  var textC   = dark ? '#8a93a6' : '#667085';
+  var gridC   = dark ? 'rgba(255,255,255,.07)' : '#eef0f3';
+  var sliceBd = dark ? '#121826' : '#ffffff';
+  var legendC = dark ? '#c3cad6' : '#3a4256';
+  var barC    = dark ? '#5b82f6' : '#2456e6';
+  var barH    = dark ? '#7c9dff' : '#1d47c4';
+  var tipBg   = dark ? '#eef1f6' : '#101828';
+  var tipFg   = dark ? '#101828' : '#ffffff';
+  var pal     = dark
+    ? ['#5b82f6','#9b8cff','#22c1d6','#7aa2ff','#b79bff','#4bcb93','#f0ad4e','#f27a9b']
+    : ['#2456e6','#6b5bd6','#0ea5b7','#5b8def','#9b6dd6','#2f9e78','#e08a2b','#dc5b7a'];
+  var colors = CHART_LABELS.map(function(_, i){ return pal[i % pal.length]; });
+
   Chart.defaults.font.family = "'Inter', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
-  Chart.defaults.color = '#667085';
-  var tooltip = {backgroundColor:'#101828', padding:10, cornerRadius:8,
+  Chart.defaults.color = textC;
+  var tip = {backgroundColor:tipBg, titleColor:tipFg, bodyColor:tipFg, padding:10, cornerRadius:0,
     titleFont:{size:12, weight:'600'}, bodyFont:{size:12}};
 
-  new Chart(document.getElementById('c1'), {type:'bar',
-    data:{labels:labels, datasets:[{label:'Hosts', data:counts,
-      backgroundColor:'#2456e6', hoverBackgroundColor:'#1d47c4', borderRadius:6, maxBarThickness:52}]},
-    options:{responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false}, tooltip:Object.assign({displayColors:false}, tooltip)},
-      scales:{
-        x:{grid:{display:false}, border:{display:false}, ticks:{font:{size:12}}},
-        y:{beginAtZero:true, grid:{color:'#eef0f3'}, border:{display:false}, ticks:{precision:0, font:{size:12}}}
-      }}});
+  _charts.forEach(function(c){ try { c.destroy(); } catch (e) {} });
+  _charts = [];
 
-  new Chart(document.getElementById('c2'), {type:'doughnut',
-    data:{labels:labels, datasets:[{data:counts, backgroundColor:colors,
-      borderColor:'#ffffff', borderWidth:2, hoverOffset:6}]},
+  _charts.push(new Chart(document.getElementById('c1'), {type:'bar',
+    data:{labels:CHART_LABELS, datasets:[{label:'Hosts', data:CHART_COUNTS,
+      backgroundColor:barC, hoverBackgroundColor:barH, borderRadius:0, maxBarThickness:52}]},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:Object.assign({displayColors:false}, tip)},
+      scales:{
+        x:{grid:{display:false}, border:{display:false}, ticks:{color:textC, font:{size:12}}},
+        y:{beginAtZero:true, grid:{color:gridC}, border:{display:false}, ticks:{color:textC, precision:0, font:{size:12}}}
+      }}}));
+
+  _charts.push(new Chart(document.getElementById('c2'), {type:'doughnut',
+    data:{labels:CHART_LABELS, datasets:[{data:CHART_COUNTS, backgroundColor:colors,
+      borderColor:sliceBd, borderWidth:2, hoverOffset:6}]},
     options:{responsive:true, maintainAspectRatio:false, cutout:'66%',
       plugins:{
-        legend:{position:'right', labels:{color:'#3a4256', font:{size:12}, padding:14,
+        legend:{position:'right', labels:{color:legendC, font:{size:12}, padding:14,
           usePointStyle:true, pointStyle:'circle', boxWidth:8}},
         tooltip:Object.assign({displayColors:true, callbacks:{label:function(ctx){
           var t = ctx.dataset.data.reduce(function(a,b){return a+b;}, 0) || 1;
           var v = ctx.parsed;
           return ' ' + v + ' hosts (' + ((v/t)*100).toFixed(1) + '%)';
-        }}}, tooltip)
-      }}});
-});
+        }}}, tip)
+      }}}));
+}
+document.addEventListener('DOMContentLoaded', renderCharts);
 </script>
 </body>
 </html>"""
