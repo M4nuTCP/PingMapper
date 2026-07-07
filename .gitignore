@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Salida de escaneos de PingMapper
+scan_*/
+*.xml
+ips_trama_*.txt
+trama_ips_*.txt
+network_report*.html
