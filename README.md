@@ -8,11 +8,42 @@ Herramienta de descubrimiento de red para auditorias. Detecta todas las tramas y
 
 ## Instalacion
 
+### Opcion A — Instalar como binario del sistema (recomendado en Kali Linux)
+
+Instala PingMapper como el comando `pingmapper`, para poder ejecutarlo desde
+cualquier ruta sin depender de la carpeta del `git clone`:
+
+```bash
+git clone https://github.com/M4nuTCP/PingMapper.git
+cd PingMapper
+sudo ./install.sh
+```
+
+El instalador:
+- instala las dependencias (`nmap`, `python3-pip`, `jinja2`),
+- copia PingMapper a `/usr/local/lib/pingmapper/`,
+- crea el lanzador `/usr/local/bin/pingmapper`.
+
+Despues puedes ejecutarlo desde cualquier directorio:
+
+```bash
+sudo pingmapper --profile normal --name auditoria_cliente
+```
+
+Para desinstalarlo:
+
+```bash
+sudo ./install.sh --uninstall
+```
+
+### Opcion B — Ejecucion directa (sin instalar)
+
 ```bash
 git clone https://github.com/M4nuTCP/PingMapper.git
 cd PingMapper
 pip3 install -r requirements.txt
 sudo apt install nmap
+sudo python3 pingmapper.py --profile normal
 ```
 
 ## Uso
@@ -66,8 +97,21 @@ sudo python3 pingmapper.py --profile normal --skip-nmap
 - **`-Pn`**: no envia pings de descubrimiento nmap (ya se hizo con el ping sweep).
 - Los nmap de cada subred se lanzan **secuencialmente**, nunca en paralelo.
 
+## Informe HTML
+
+El `network_report.html` es un informe interactivo y autocontenido:
+
+- **Copiar / descargar IPs por trama**: cada subred tiene un boton **Copiar IPs**
+  (al portapapeles) y otro **.txt** que descarga un fichero
+  `trama_ips_<rama>.0.txt` con las IPs una debajo de otra.
+- **Copiar / descargar todas las IPs**: botones globales en la barra de
+  herramientas (`trama_ips_todas.txt`).
+- **Filtro** por IP, puerto o servicio, y controles para expandir/colapsar todo.
+- Diseno oscuro profesional con estadisticas, badges de puertos y graficas.
+
 ## Flujo de trabajo en auditoria
 
 1. Ejecutar PingMapper en la red objetivo
 2. Los XML generados se importan directamente en [pentest.ws](https://pentest.ws)
-3. El HTML sirve como informe inicial para el cliente
+3. El HTML sirve como informe inicial para el cliente; desde el se pueden
+   copiar o exportar las IPs de cada trama con un clic

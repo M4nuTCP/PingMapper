@@ -459,87 +459,184 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>PingMapper - Informe de Red</title>
 <style>
+:root {
+  --bg:       #0a0e17;
+  --bg-soft:  #0f1420;
+  --panel:    #141a28;
+  --panel-2:  #1a2233;
+  --border:   #232c40;
+  --text:     #dce3ef;
+  --muted:    #7a879e;
+  --accent:   #3ddc84;
+  --cyan:     #56c8ff;
+  --orange:   #ffb454;
+  --shadow:   0 8px 24px rgba(0,0,0,.35);
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', Arial, sans-serif; background: #0d0d1a; color: #e0e0e0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  background: radial-gradient(1200px 600px at 20% -10%, #12203a 0%, transparent 60%),
+              radial-gradient(1000px 500px at 100% 0%, #0f2a24 0%, transparent 55%),
+              var(--bg);
+  color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased;
+}
+.mono { font-family: 'JetBrains Mono','Fira Code','SFMono-Regular',Consolas,'Liberation Mono',monospace; }
+
 header {
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
-    border-bottom: 2px solid #4caf50;
-    padding: 18px 30px;
-    display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(12,17,28,.82); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border); padding: 16px 32px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
 }
-header h1 { color: #4caf50; font-size: 1.7em; letter-spacing: 2px; }
-header .meta { font-size: 0.82em; color: #888; text-align: right; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo {
+  width: 42px; height: 42px; border-radius: 11px;
+  background: linear-gradient(135deg, var(--accent), var(--cyan));
+  display: grid; place-items: center; font-size: 1.35em;
+  box-shadow: 0 0 22px rgba(61,220,132,.35);
+}
+header h1 { font-size: 1.35em; font-weight: 700; letter-spacing: .5px; }
+header h1 span { color: var(--accent); }
+.subtitle { color: var(--muted); font-size: .78em; margin-top: 2px; letter-spacing: .3px; }
+.meta { text-align: right; font-size: .8em; color: var(--muted); line-height: 1.5; }
 .profile-badge {
-    display: inline-block; margin-top: 4px;
-    background: #1e3a1e; border: 1px solid #4caf50;
-    color: #4caf50; font-size: 0.75em; border-radius: 4px; padding: 2px 8px;
+  display: inline-block; margin-top: 3px;
+  background: rgba(61,220,132,.12); border: 1px solid rgba(61,220,132,.4);
+  color: var(--accent); font-size: .92em; border-radius: 20px; padding: 2px 12px;
 }
+.author { color: var(--accent); font-weight: 600; margin-top: 4px; }
+
 .stats-bar {
-    display: flex; gap: 12px; padding: 14px 30px;
-    background: #111120; border-bottom: 1px solid #1e1e2e; flex-wrap: wrap;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px; padding: 22px 32px 8px;
 }
 .stat-card {
-    background: #1a1a2e; border: 1px solid #4caf50;
-    border-radius: 6px; padding: 10px 22px; text-align: center; min-width: 120px;
+  background: linear-gradient(160deg, var(--panel), var(--bg-soft));
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px 20px; box-shadow: var(--shadow); position: relative; overflow: hidden;
 }
-.stat-card .num { font-size: 1.9em; color: #4caf50; font-weight: bold; }
-.stat-card .lbl { font-size: 0.72em; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-.container { padding: 20px 30px; }
-.subnet-block { margin-bottom: 22px; border: 1px solid #252535; border-radius: 8px; overflow: hidden; }
+.stat-card::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+  background: linear-gradient(var(--accent), var(--cyan));
+}
+.stat-card .num { font-size: 2.1em; font-weight: 800; color: var(--text); line-height: 1; }
+.stat-card .lbl { font-size: .72em; color: var(--muted); text-transform: uppercase; letter-spacing: 1.4px; margin-top: 6px; }
+
+.toolbar {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  padding: 16px 32px; justify-content: space-between;
+}
+.filter {
+  flex: 1; min-width: 220px; max-width: 420px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 10px; padding: 10px 14px; font-size: .9em;
+  transition: border-color .15s, box-shadow .15s;
+}
+.filter:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(61,220,132,.15); }
+.filter::placeholder { color: var(--muted); }
+.toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(61,220,132,.12); color: var(--accent);
+  border: 1px solid rgba(61,220,132,.38); border-radius: 8px;
+  padding: 7px 13px; font-size: .78em; font-weight: 600;
+  cursor: pointer; transition: all .15s ease; font-family: inherit; white-space: nowrap;
+}
+.btn:hover { background: rgba(61,220,132,.22); box-shadow: 0 0 14px rgba(61,220,132,.28); }
+.btn:active { transform: translateY(1px); }
+.btn-ghost { color: var(--cyan); background: rgba(86,200,255,.1); border-color: rgba(86,200,255,.35); }
+.btn-ghost:hover { background: rgba(86,200,255,.2); box-shadow: 0 0 14px rgba(86,200,255,.25); }
+
+.container { padding: 8px 32px 30px; }
+.subnet-block {
+  margin-bottom: 16px; border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; background: var(--bg-soft); box-shadow: var(--shadow);
+}
 .subnet-header {
-    background: #1a1a2e; border-left: 4px solid #4caf50;
-    padding: 11px 18px; cursor: pointer;
-    display: flex; justify-content: space-between; align-items: center; user-select: none;
+  background: linear-gradient(120deg, var(--panel), var(--bg-soft));
+  padding: 14px 18px; cursor: pointer; user-select: none;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  transition: background .15s;
 }
-.subnet-header:hover { background: #1e2040; }
-.subnet-header h3 { color: #4caf50; font-size: 0.95em; font-family: monospace; }
-.badge { border-radius: 12px; padding: 2px 10px; font-size: 0.72em; font-weight: bold; }
-.badge-green  { background: #4caf50; color: #000; }
-.badge-orange { background: #ff9800; color: #000; }
-.badge-grey   { background: #333; color: #888; }
-.subnet-body { display: none; padding: 14px; background: #10101c; }
-.host-block { margin-bottom: 10px; border: 1px solid #202030; border-radius: 6px; overflow: hidden; }
+.subnet-header:hover { background: var(--panel-2); }
+.sn-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.chevron { color: var(--accent); font-size: .8em; transition: transform .2s ease; display: inline-block; }
+.subnet-block.open > .subnet-header .chevron { transform: rotate(90deg); }
+.subnet-header h3 { color: var(--text); font-size: 1em; font-weight: 700; }
+.sn-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.badge { border-radius: 20px; padding: 3px 11px; font-size: .72em; font-weight: 700; letter-spacing: .3px; }
+.badge-green  { background: rgba(61,220,132,.18); color: var(--accent); border: 1px solid rgba(61,220,132,.4); }
+.badge-orange { background: rgba(255,180,84,.16); color: var(--orange); border: 1px solid rgba(255,180,84,.4); }
+.badge-grey   { background: rgba(122,135,158,.14); color: var(--muted); border: 1px solid rgba(122,135,158,.3); }
+.subnet-body { display: none; padding: 14px 16px; background: var(--bg); border-top: 1px solid var(--border); }
+
+.host-block { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.host-block:last-child { margin-bottom: 0; }
 .host-header {
-    background: #18182a; padding: 7px 14px; cursor: pointer;
-    display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 14px; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  transition: background .15s;
 }
-.host-header:hover { background: #1e1e38; }
-.host-ip { color: #81d4fa; font-family: monospace; font-size: 0.92em; }
-.host-ports-body { display: none; padding: 10px; background: #0c0c18; }
-table.ports { width: 100%; border-collapse: collapse; font-size: 0.83em; }
+.host-header:hover { background: var(--panel-2); }
+.host-left { display: flex; align-items: center; gap: 10px; }
+.host-ip { color: var(--cyan); font-size: .92em; font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.host-ports-body { display: none; padding: 12px 14px; background: var(--bg); border-top: 1px solid var(--border); }
+
+table.ports { width: 100%; border-collapse: collapse; font-size: .84em; }
 table.ports th {
-    background: #1e1e30; color: #4caf50;
-    padding: 6px 10px; text-align: left; border-bottom: 1px solid #2a2a40;
+  background: var(--panel-2); color: var(--accent);
+  padding: 8px 12px; text-align: left; font-weight: 600;
+  text-transform: uppercase; font-size: .82em; letter-spacing: .6px;
 }
-table.ports td { padding: 5px 10px; border-bottom: 1px solid #18182a; font-family: monospace; }
-table.ports tr:hover td { background: #16162a; }
-.p-num { color: #ff9800; }
-.p-svc { color: #81d4fa; }
-.p-ver { color: #aaa; }
-.no-data { color: #444; font-size: 0.82em; padding: 8px 4px; }
-.charts { display: flex; gap: 20px; flex-wrap: wrap; padding: 10px 30px 30px; }
-.chart-box {
-    background: #1a1a2e; border: 1px solid #252535;
-    border-radius: 8px; padding: 20px; flex: 1; min-width: 300px;
+table.ports td { padding: 7px 12px; border-bottom: 1px solid var(--border); }
+table.ports tr:last-child td { border-bottom: none; }
+table.ports tbody tr:hover td { background: rgba(86,200,255,.05); }
+.p-num { color: var(--orange); font-weight: 600; }
+.p-svc { color: var(--cyan); }
+.p-ver { color: var(--muted); }
+.no-data { color: var(--muted); font-size: .84em; padding: 6px 2px; font-style: italic; }
+
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; padding: 8px 32px 32px; }
+.chart-box { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
+.chart-box h4 { color: var(--muted); margin-bottom: 16px; font-size: .78em; letter-spacing: 1.4px; text-transform: uppercase; }
+.empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+
+footer { text-align: center; padding: 20px; color: var(--muted); font-size: .78em; border-top: 1px solid var(--border); }
+footer span { color: var(--accent); }
+
+.toast {
+  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--accent);
+  padding: 11px 22px; border-radius: 10px; font-size: .88em; font-weight: 600;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .2s; z-index: 100;
 }
-.chart-box h4 { color: #4caf50; margin-bottom: 14px; font-size: 0.88em; letter-spacing: 1px; }
-footer {
-    text-align: center; padding: 14px;
-    background: #090912; border-top: 1px solid #1a1a2a; color: #444; font-size: 0.78em;
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 640px) {
+  header { flex-direction: column; align-items: flex-start; }
+  .meta { text-align: left; }
+  .subnet-header { flex-direction: column; align-items: flex-start; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <header>
-  <div>
-    <h1>PingMapper</h1>
-    <div style="color:#555;font-size:0.8em;margin-top:3px">Network Discovery &amp; Audit Report</div>
+  <div class="brand">
+    <div class="logo">&#128225;</div>
+    <div>
+      <h1>Ping<span>Mapper</span></h1>
+      <div class="subtitle">Network Discovery &amp; Audit Report</div>
+    </div>
   </div>
   <div class="meta">
     <div>{{ scan_time }}</div>
     <div><span class="profile-badge">perfil: {{ profile }}</span></div>
-    <div style="color:#4caf50;margin-top:4px">M4nuTCP</div>
+    <div class="author">M4nuTCP</div>
   </div>
 </header>
 
@@ -549,20 +646,40 @@ footer {
   <div class="stat-card"><div class="num">{{ total_open_ports }}</div><div class="lbl">Puertos abiertos</div></div>
 </div>
 
+<div class="toolbar">
+  <input id="filter" class="filter" placeholder="&#128269; Filtrar por IP, puerto o servicio..." oninput="applyFilter(this.value)">
+  <div class="toolbar-actions">
+    <button class="btn" onclick="expandAll(true)">Expandir todo</button>
+    <button class="btn" onclick="expandAll(false)">Colapsar todo</button>
+    <button class="btn" onclick="copyAllIps()">&#128203; Copiar todas las IPs</button>
+    <button class="btn btn-ghost" onclick="downloadAllIps()">&#11015; Descargar todas .txt</button>
+  </div>
+</div>
+
 <div class="container">
 {% for subnet in subnets %}
-  <div class="subnet-block">
-    <div class="subnet-header" onclick="tog('sn{{ loop.index }}')">
-      <h3>&#9658; {{ subnet }}.0/24</h3>
-      <span class="badge badge-green">{{ hosts[subnet]|length }} hosts</span>
+  <div class="subnet-block" data-subnet="{{ subnet }}">
+    <div class="subnet-header" onclick="tog('sn{{ loop.index }}', this)">
+      <div class="sn-title">
+        <span class="chevron">&#9656;</span>
+        <h3 class="mono">{{ subnet }}.0/24</h3>
+        <span class="badge {% if hosts[subnet]|length %}badge-green{% else %}badge-grey{% endif %}">{{ hosts[subnet]|length }} hosts</span>
+      </div>
+      <div class="sn-actions">
+        <button class="btn" onclick="copyIps(event, this)" title="Copiar las IPs de esta trama">&#128203; Copiar IPs</button>
+        <button class="btn btn-ghost" onclick="downloadIps(event, this, '{{ subnet }}')" title="Descargar trama_ips_{{ subnet }}.0.txt">&#11015; .txt</button>
+      </div>
     </div>
     <div class="subnet-body" id="sn{{ loop.index }}">
       {% for ip in hosts[subnet] %}
       {% set hd = nmap_data.get(subnet, {}).get(ip, {}) %}
       {% set pts = hd.get('ports', []) %}
       <div class="host-block">
-        <div class="host-header" onclick="tog('h_{{ ip|replace('.','_') }}')">
-          <span class="host-ip">{{ ip }}</span>
+        <div class="host-header" onclick="tog('h_{{ ip|replace('.','_') }}', this)">
+          <div class="host-left">
+            <span class="dot"></span>
+            <span class="host-ip mono">{{ ip }}</span>
+          </div>
           {% if pts %}
           <span class="badge badge-orange">{{ pts|length }} puertos</span>
           {% else %}
@@ -571,7 +688,7 @@ footer {
         </div>
         <div class="host-ports-body" id="h_{{ ip|replace('.','_') }}">
           {% if pts %}
-          <table class="ports">
+          <table class="ports mono">
             <thead><tr><th>Puerto</th><th>Proto</th><th>Servicio</th><th>Version / Info</th></tr></thead>
             <tbody>
             {% for p in pts %}
@@ -590,36 +707,134 @@ footer {
         </div>
       </div>
       {% endfor %}
+      {% if not hosts[subnet] %}
+      <div class="no-data">Sin hosts activos en esta subred.</div>
+      {% endif %}
     </div>
   </div>
 {% endfor %}
+{% if not subnets %}
+  <div class="empty">No se detectaron subredes activas.</div>
+{% endif %}
 </div>
 
 <div class="charts">
-  <div class="chart-box"><h4>HOSTS POR SUBRED</h4><canvas id="c1"></canvas></div>
-  <div class="chart-box"><h4>DISTRIBUCION (%)</h4><canvas id="c2"></canvas></div>
+  <div class="chart-box"><h4>Hosts por subred</h4><canvas id="c1"></canvas></div>
+  <div class="chart-box"><h4>Distribuci&oacute;n (%)</h4><canvas id="c2"></canvas></div>
 </div>
-<footer>PingMapper &mdash; M4nuTCP &mdash; {{ scan_time }}</footer>
+<footer>PingMapper &mdash; <span>M4nuTCP</span> &mdash; {{ scan_time }}</footer>
+<div id="toast" class="toast"></div>
 
 <script>
-function tog(id) {
+function tog(id, headerEl) {
   var e = document.getElementById(id);
-  if (e) e.style.display = (e.style.display === 'block') ? 'none' : 'block';
+  if (!e) return;
+  var open = e.style.display === 'block';
+  e.style.display = open ? 'none' : 'block';
+  var block = headerEl ? headerEl.parentElement : e.parentElement;
+  if (block) block.classList.toggle('open', !open);
+}
+function expandAll(open) {
+  document.querySelectorAll('.subnet-body, .host-ports-body').forEach(function(b){
+    b.style.display = open ? 'block' : 'none';
+  });
+  document.querySelectorAll('.subnet-block, .host-block').forEach(function(b){
+    b.classList.toggle('open', open);
+  });
+}
+function ipsIn(scope) {
+  var ips = [];
+  scope.querySelectorAll('.host-ip').forEach(function(el){
+    var t = el.textContent.trim();
+    if (t) ips.push(t);
+  });
+  return ips;
+}
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).catch(function(){ return legacyCopy(text); });
+  }
+  return legacyCopy(text);
+}
+function legacyCopy(text) {
+  return new Promise(function(resolve){
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta); resolve();
+  });
+}
+function saveFile(filename, text) {
+  var blob = new Blob([text], {type: 'text/plain;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+}
+function toast(msg) {
+  var t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(function(){ t.classList.remove('show'); }, 1800);
+}
+function copyIps(ev, btn) {
+  ev.stopPropagation();
+  var ips = ipsIn(btn.closest('.subnet-block'));
+  if (!ips.length) { toast('No hay IPs en esta trama'); return; }
+  copyText(ips.join('\\n')).then(function(){ toast(ips.length + ' IP(s) copiadas'); });
+}
+function downloadIps(ev, btn, subnet) {
+  ev.stopPropagation();
+  var ips = ipsIn(btn.closest('.subnet-block'));
+  if (!ips.length) { toast('No hay IPs en esta trama'); return; }
+  var name = 'trama_ips_' + subnet + '.0.txt';
+  saveFile(name, ips.join('\\n') + '\\n');
+  toast('Descargado ' + name);
+}
+function copyAllIps() {
+  var ips = ipsIn(document);
+  if (!ips.length) { toast('No hay IPs'); return; }
+  copyText(ips.join('\\n')).then(function(){ toast(ips.length + ' IP(s) copiadas'); });
+}
+function downloadAllIps() {
+  var ips = ipsIn(document);
+  if (!ips.length) { toast('No hay IPs'); return; }
+  saveFile('trama_ips_todas.txt', ips.join('\\n') + '\\n');
+  toast('Descargado trama_ips_todas.txt (' + ips.length + ' IPs)');
+}
+function applyFilter(q) {
+  q = (q || '').trim().toLowerCase();
+  document.querySelectorAll('.subnet-block').forEach(function(sb){
+    var any = false;
+    sb.querySelectorAll('.host-block').forEach(function(hb){
+      var match = !q || hb.textContent.toLowerCase().indexOf(q) !== -1;
+      hb.style.display = match ? '' : 'none';
+      if (match) any = true;
+    });
+    sb.style.display = any ? '' : 'none';
+    var body = sb.querySelector('.subnet-body');
+    if (q && body) { body.style.display = any ? 'block' : 'none'; sb.classList.toggle('open', any); }
+  });
 }
 document.addEventListener('DOMContentLoaded', function () {
   var labels = [{% for s in subnets %}"{{ s }}.0/24",{% endfor %}];
   var counts = [{% for s in subnets %}{{ hosts[s]|length }},{% endfor %}];
-  var total  = counts.reduce(function(a,b){return a+b;}, 1);
+  if (!labels.length || typeof Chart === 'undefined') return;
+  var total  = counts.reduce(function(a,b){return a+b;}, 0) || 1;
   var pcts   = counts.map(function(c){return ((c/total)*100).toFixed(1);});
-  var pal    = ['#4caf50','#ff9800','#2196f3','#f44336','#9c27b0','#00bcd4','#ffeb3b','#e91e63'];
-  var grid   = {color:'#1e1e2e'}; var tc = {color:'#888'};
+  var pal    = ['#3ddc84','#56c8ff','#ffb454','#ff6b6b','#b57bff','#00d4c8','#ffd93d','#ff8fb3'];
+  var grid   = {color:'rgba(255,255,255,.06)'}; var tc = {color:'#7a879e'};
   new Chart(document.getElementById('c1'),{type:'bar',
-    data:{labels:labels,datasets:[{label:'Hosts',data:counts,backgroundColor:pal}]},
-    options:{responsive:true,plugins:{legend:{labels:{color:'#ccc'}}},
-      scales:{x:{ticks:tc,grid:grid},y:{ticks:tc,grid:grid}}}});
+    data:{labels:labels,datasets:[{label:'Hosts',data:counts,backgroundColor:pal,borderRadius:6}]},
+    options:{responsive:true,plugins:{legend:{display:false}},
+      scales:{x:{ticks:tc,grid:grid},y:{ticks:tc,grid:grid,beginAtZero:true}}}});
   new Chart(document.getElementById('c2'),{type:'doughnut',
-    data:{labels:labels,datasets:[{data:pcts,backgroundColor:pal}]},
-    options:{responsive:true,plugins:{legend:{labels:{color:'#ccc'}}}}});
+    data:{labels:labels,datasets:[{data:pcts,backgroundColor:pal,borderColor:'#0a0e17',borderWidth:2}]},
+    options:{responsive:true,cutout:'62%',plugins:{legend:{position:'right',labels:{color:'#dce3ef',font:{size:11},padding:12}}}}});
 });
 </script>
 </body>
