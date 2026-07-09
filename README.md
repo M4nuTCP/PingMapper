@@ -109,6 +109,32 @@ El `network_report.html` es un informe interactivo y autocontenido:
 - **Filtro** por IP, puerto o servicio, y controles para expandir/colapsar todo.
 - Diseno oscuro profesional con estadisticas, badges de puertos y graficas.
 
+## Escaneo por fases de una sola trama (`scan_trama.sh`)
+
+Script nmap independiente que, dada una trama en formato CIDR, encadena las tres
+fases y usa `--top-ports 1000` en el descubrimiento de puertos:
+
+1. **Equipos activos** — `nmap -sn` (host discovery) → `ips_trama_<red>.txt`
+2. **Puertos de los equipos** — `-sS --top-ports 1000 --open` sobre los equipos activos
+3. **Servicios / versiones** — lanza el comando preferido sobre los puertos encontrados:
+
+```bash
+sudo nmap -p<puertos> -sS -sV --min-rate 3000 --open -vvv -n \
+          -oX trama_<red>.xml -Pn -iL ips_trama_<red>.txt
+```
+
+Uso:
+
+```bash
+sudo ./scan_trama.sh 172.16.12.0/24
+sudo ./scan_trama.sh 172.16.12.0/24 -r 5000 -o auditoria   # min-rate y carpeta
+sudo ./scan_trama.sh 10.0.0.0/24 --full-ports              # fase 2 con -p- (todos)
+sudo ./scan_trama.sh 10.0.0.0/24 --no-discovery            # sin fase 1 (toda la trama)
+```
+
+Genera `ips_trama_<red>.txt`, `ports_trama_<red>.gnmap` y `trama_<red>.xml`
+(importable en pentest.ws).
+
 ## Flujo de trabajo en auditoria
 
 1. Ejecutar PingMapper en la red objetivo
